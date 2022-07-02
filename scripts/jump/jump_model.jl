@@ -2,6 +2,8 @@
 using ExaPF
 using JuMP
 using Ipopt
+using MadNLP
+using MadNLPHSL
 using LinearAlgebra
 const PS = ExaPF.PowerSystem
 
@@ -63,10 +65,12 @@ function build_opf_model(polar, buffer, solver; line_constraints=true)
     @variable(opfmodel, vm_min[i] <= Vm[i=1:nbus] <= vm_max[i], start=vm0[i])
     @variable(opfmodel, Va[i=1:nbus], start=va0[i])
 
-    @variable(opfmodel, Pd[i=1:nbus])
-    @variable(opfmodel, Qd[i=1:nbus])
-    JuMP.fix.(Pd, buffer.pload)
-    JuMP.fix.(Qd, buffer.qload)
+    # @variable(opfmodel, Pd[i=1:nbus])
+    # @variable(opfmodel, Qd[i=1:nbus])
+    # JuMP.fix.(Pd, buffer.pload)
+    # JuMP.fix.(Qd, buffer.qload)
+    Pd = buffer.pload
+    Qd = buffer.qload
 
     # Power-flow constraints
     ## active
@@ -122,7 +126,7 @@ function build_opf_model(polar, buffer, solver; line_constraints=true)
     @objective(
         opfmodel,
         Min,
-        sum(
+        1e-3 * sum(
             cost_coefs[g, 4] * Pg[g]^2 + cost_coefs[g, 3] * Pg[g] + cost_coefs[g, 2]
             for g in 1:ngen
         )
@@ -173,6 +177,22 @@ function main(datafile::String)
     polar = ExaPF.PolarForm(datafile)
     stack = ExaPF.NetworkStack(polar)
     m = build_opf_model(polar, stack, Ipopt.Optimizer; line_constraints=true)
+    # attach_callback!(m)
+    JuMP.optimize!(m)
+    return m
+end
+
+function madnlp(datafile::String)
+    polar = ExaPF.PolarForm(datafile)
+    stack = ExaPF.NetworkStack(polar)
+    optimizer = () -> MadNLP.Optimizer(
+        linear_solver=MadNLPMa27,
+        print_level=MadNLP.DEBUG,
+        nlp_scaling=true,
+        tol=1e-10,
+        dual_initialized=true,
+    )
+    m = build_opf_model(polar, stack, optimizer; line_constraints=true)
     # attach_callback!(m)
     JuMP.optimize!(m)
     return m
